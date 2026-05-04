@@ -131,12 +131,15 @@ Conventions:
 
 ## Watching CI checks
 
-After pushing or opening the PR, the agent should wait for CI before declaring success. Three idioms:
+After pushing or opening the PR, the agent should wait for CI before declaring success.
+
+### Preferred: `gh pr checks`
 
 ```sh
 gh pr checks                    # one-shot snapshot
 gh pr checks --watch            # blocks until all checks resolve
-gh pr view --json statusCheckRollup --jq '.statusCheckRollup[] | "\(.name): \(.conclusion // .status)"'
+gh pr view --json statusCheckRollup \
+  --jq '.statusCheckRollup[] | "\(.name): \(.conclusion // .status)"'
 ```
 
 For a specific failed run, get logs:
@@ -144,15 +147,95 @@ For a specific failed run, get logs:
 ```sh
 gh run list --branch feat/short-summary --limit 5
 gh run view <run-id> --log-failed
+gh run rerun <run-id> --failed   # re-run only failed jobs without pushing
 ```
 
-If you push a fix, GitHub re-runs the checks automatically. To re-run an existing failed run without code changes:
+### Fallback: when `gh pr checks` doesn't work
+
+`gh pr checks` can fail for two non-obvious reasons:
+
+1. **`gh` not installed** in the current environment (minimal sandbox, CI image, etc.)
+2. **The token is a fine-grained PAT.** GitHub deliberately blocks fine-grained PATs from reading individual check-run details — both via `GET /repos/.../check-runs` (REST) and via `statusCheckRollup.contexts.nodes[].name` (GraphQL). `gh pr checks` walks those nodes, hits the FORBIDDEN, and bails with `Resource not accessible by personal access token`. No permission grant fixes this; the limitation is by token type. To use `gh pr checks` natively, the credentials must be a classic PAT (with `repo` scope) or a GitHub App.
+
+When either applies, fall back to three direct API calls — together they answer everything `gh pr checks` would.
+
+**1. Aggregate "did CI pass?" — `statusCheckRollup.state`** (works with fine-grained PATs):
 
 ```sh
-gh run rerun <run-id> --failed
+curl -sH "Authorization: bearer $GITHUB_TOKEN" -H 'Content-Type: application/json' \
+  https://api.github.com/graphql -d "{
+    \"query\":\"query { repository(owner:\\\"$OWNER\\\",name:\\\"$REPO\\\") {
+      pullRequest(number:$PR) {
+        commits(last:1) { nodes { commit { statusCheckRollup { state } } } }
+      } } }\"
+  }" | jq -r '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.state'
+# → SUCCESS | FAILURE | PENDING | ERROR
 ```
 
-**Don't merge a PR with failing required checks.** If a check is consistently flaky, fix it or mark it non-required — don't bypass it.
+**2. Mergeable state — `pull.mergeable_state`** (gives required-check awareness when the repo has branch protection):
+
+```sh
+curl -sH "Authorization: token $GITHUB_TOKEN" \
+  "https://api.github.com/repos/$OWNER/$REPO/pulls/$PR" \
+  | jq -r '.mergeable_state'
+# → clean   = required checks pass + branch up-to-date + reviews ok → ready to merge
+# → unstable = optional checks failed but mergeable
+# → blocked = something required is blocking
+# → behind  = needs rebase against base
+# → dirty   = merge conflicts
+# → unknown = GitHub still computing (retry) or PR closed
+```
+
+`mergeable_state` only encodes required-check status when the repo has branch protection or rulesets configured — those are Pro+ features for private repos. Public repos get them free. If neither is configured, GitHub treats every check as optional, and the signal degrades to "is the PR open and conflict-free."
+
+**3. Per-workflow detail — Actions API** (works with `Actions: Read`):
+
+```sh
+SHA=$(curl -sH "Authorization: token $GITHUB_TOKEN" \
+        "https://api.github.com/repos/$OWNER/$REPO/pulls/$PR" | jq -r .head.sha)
+
+# Snapshot
+curl -sH "Authorization: token $GITHUB_TOKEN" \
+  "https://api.github.com/repos/$OWNER/$REPO/actions/runs?head_sha=$SHA" \
+  | jq -r '.workflow_runs[] | "\(.name): \(.status) \(.conclusion // "")"'
+
+# Drill into a failed run's jobs and steps
+curl -sH "Authorization: token $GITHUB_TOKEN" \
+  "https://api.github.com/repos/$OWNER/$REPO/actions/runs/$RUN_ID/jobs" \
+  | jq -r '.jobs[] | "\(.name): \(.conclusion)" + (
+      [.steps[]? | select(.conclusion == "failure") | "  failed step: " + .name] | join("\n")
+    )'
+
+# Failed-job logs (returns redirect to a zipped log file)
+curl -sLH "Authorization: token $GITHUB_TOKEN" \
+  "https://api.github.com/repos/$OWNER/$REPO/actions/jobs/$JOB_ID/logs" -o job-logs.zip
+```
+
+Note: `head_sha` must be the **full 40-char SHA** — abbreviated SHAs silently return empty results.
+
+**4. Watch loop — poll until terminal state** (replaces `gh pr checks --watch`):
+
+```sh
+SHA=$(curl -sH "Authorization: token $GITHUB_TOKEN" \
+        "https://api.github.com/repos/$OWNER/$REPO/pulls/$PR" | jq -r .head.sha)
+while :; do
+  R=$(curl -sH "Authorization: token $GITHUB_TOKEN" \
+        "https://api.github.com/repos/$OWNER/$REPO/actions/runs?head_sha=$SHA")
+  PENDING=$(jq '[.workflow_runs[] | select(.status != "completed")] | length' <<<"$R")
+  TOTAL=$(jq '.total_count' <<<"$R")
+  FAILED=$(jq '[.workflow_runs[] | select(.conclusion=="failure" or .conclusion=="cancelled")] | length' <<<"$R")
+  printf "%s  %d/%d done, %d failed\n" "$(date +%T)" $((TOTAL-PENDING)) "$TOTAL" "$FAILED"
+  [ "$PENDING" = "0" ] && break
+  sleep 30
+done
+[ "$FAILED" = "0" ] && echo "all green" || echo "CI failed"
+```
+
+This Actions-API path covers GitHub Actions checks only. External CI providers (CircleCI, Buildkite, Codecov) write to the Checks API, not the Actions API — those *will* be invisible to a fine-grained PAT, regardless of fallback. For Actions-only repos (the common case), coverage is complete.
+
+### Don't merge a PR with failing required checks
+
+If a check is consistently flaky, fix it or mark it non-required — don't bypass it.
 
 ---
 
