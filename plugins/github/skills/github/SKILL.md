@@ -1,72 +1,53 @@
 ---
 name: github
-description: Use when working with GitHub repositories — cloning, creating branches, opening pull requests, monitoring CI checks, requesting reviews, or merging. Covers best practices for `gh` CLI and `git` together. Apply this skill any time the task involves a GitHub repo URL, a PR, a branch, or anything in `.github/`.
+description: Use when working with GitHub repositories — cloning, creating branches, opening pull requests, monitoring CI checks, requesting reviews, or merging. Covers best practices for `gh` CLI and `git`. Apply this skill any time the task involves a GitHub repo URL, a PR, a branch, or `.github/`.
 ---
 
 # GitHub workflow skill
 
-Best-practice patterns for `gh` CLI and `git`. Use these in order: **clone → branch → commit → push → PR → checks → review → merge → cleanup**.
+Best-practice patterns for `gh` and `git`. Standard flow: **clone → branch → commit → push → PR → checks → review → merge → cleanup**.
 
-The `gh` CLI handles auth (via `GITHUB_TOKEN` env var or stored login) and unifies operations that would otherwise need separate API calls. Prefer `gh` over raw `curl` to the API when an equivalent subcommand exists.
+Programmatic operations (status checks, watch loops, log extraction) live in `scripts/` so this skill stays short. Invoke them via `python ${CLAUDE_PLUGIN_ROOT}/scripts/<name>.py` (or adapt the path for your framework).
 
 ---
 
 ## Authentication
 
-`gh` reads credentials in this order: `GH_TOKEN` → `GITHUB_TOKEN` → `gh auth login` cached creds. If you have a token in env, you don't need to log in:
+`gh` reads `GH_TOKEN` → `GITHUB_TOKEN` → `gh auth login` cached creds. With `GITHUB_TOKEN` set, no `gh auth login` is needed.
 
-```sh
-gh auth status               # confirm auth
-gh api user --jq .login      # who am I?
-```
-
-For raw `git` over HTTPS, configure a credential helper that emits the token rather than putting it in URLs:
+For raw `git` over HTTPS, configure a credential helper so the token is fed automatically:
 
 ```sh
 git config --global credential.https://github.com.helper \
   '!f() { echo username=x-access-token; echo password=$GITHUB_TOKEN; }; f'
 ```
 
-This avoids the failure mode `fatal: could not read Username for 'https://github.com'`.
+This avoids `fatal: could not read Username for 'https://github.com'`.
+
+**Token type matters for what works:**
+- **Classic PAT** (`repo` scope) — full `gh` functionality including `gh pr checks`.
+- **Fine-grained PAT** — GitHub blocks reading individual check-run details regardless of permissions granted. `gh pr checks` will fail. Use the scripts (see below); they work with fine-grained PATs.
+- **GitHub App** — full access; preferred long-term.
 
 ---
 
 ## Cloning
 
-Use `gh repo clone` — it picks the right protocol, respects auth, and works for repos you have access to without futzing with URLs:
-
 ```sh
-gh repo clone owner/repo           # default location
-gh repo clone owner/repo path/     # specify directory
-gh repo clone owner/repo -- --depth=1 --filter=blob:none   # shallow + partial for large repos
-```
-
-For just-the-files inspection without auth setup:
-
-```sh
-gh repo view owner/repo --json defaultBranchRef,description
-gh repo view owner/repo --web        # open in browser
+gh repo clone owner/repo                       # default
+gh repo clone owner/repo -- --depth=1          # shallow for large repos
+gh repo view owner/repo --json defaultBranchRef # check default branch name
 ```
 
 ---
 
 ## Branching
 
-Always work on a feature branch off the latest default branch. Convention:
-
-```
-<type>/<short-kebab-summary>
-
-Examples:
-  feat/add-user-search
-  fix/login-token-refresh
-  docs/clarify-deploy-steps
-  refactor/extract-auth-middleware
-```
+Always branch off the latest default branch. Convention: `<type>/<short-kebab>` where type ∈ {feat, fix, refactor, docs, chore, test}.
 
 ```sh
 git fetch origin
-git switch -c feat/short-summary origin/main    # branch from up-to-date main
+git switch -c feat/short-summary origin/main
 ```
 
 Never commit on `main` directly for shared repos.
@@ -75,227 +56,116 @@ Never commit on `main` directly for shared repos.
 
 ## Committing
 
-- One logical change per commit. Use `git add -p` to stage hunks selectively when changes are mixed.
-- Imperative mood: `Add feature X`, not `Added feature X` or `Adds feature X`.
-- If the project follows Conventional Commits, match it (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`, `test:`).
-- Subject line ≤72 chars. Add a blank line + body if more context helps.
-- **Never commit secrets.** Before staging, scan: `git diff --cached | grep -iE 'token|secret|password|api_key|aws_'`.
-- Verify what's staged: `git status` then `git diff --cached`.
-
-```sh
-git add -p
-git commit -m "fix(auth): refresh token before expiry, not after"
-```
+- One logical change per commit; `git add -p` for selective staging.
+- Imperative mood (`Add X`, not `Added X`).
+- Match the project's commit style (Conventional Commits if present).
+- Subject ≤72 chars; blank line + body for context.
+- Scan for secrets before committing: `git diff --cached | grep -iE 'token|secret|password|api_key'`.
 
 ---
 
 ## Pushing
 
 ```sh
-git push -u origin feat/short-summary    # first push, sets upstream
-git push                                  # subsequent
-git push --force-with-lease               # safer force-push (fails if remote moved)
+git push -u origin <branch>            # first push
+git push --force-with-lease            # safer than --force
 ```
 
-**Never use `git push --force` to a shared/protected branch.** `--force-with-lease` only overwrites if the remote is at the commit you last fetched — fails if someone else pushed in the meantime.
+Never `git push --force` to a shared/protected branch. `--force-with-lease` only overwrites if the remote is at the commit you last fetched.
 
 ---
 
 ## Pull request creation
 
-Use `gh pr create` with a HEREDOC for the body so multi-line markdown stays intact:
+Use a HEREDOC body so multi-line markdown survives:
 
 ```sh
 gh pr create --title "Short, action-oriented title" --body "$(cat <<'EOF'
 ## Summary
-- Bullet 1
-- Bullet 2
+- bullet 1
+- bullet 2
 
 ## Why
-Brief rationale: what problem this solves, what alternative was rejected.
+brief rationale
 
 ## Test plan
-- [ ] Manual verification step
-- [ ] Automated test added at <path>
+- [ ] manual step
+- [ ] automated test added at <path>
 EOF
 )"
 ```
 
-Conventions:
-- Title under ~70 chars; details go in the body.
-- Use `--draft` for WIP — converts later with `gh pr ready`.
-- `--base` to target a non-default branch.
-- `--reviewer @user1,@user2 --assignee @me` to wire ownership.
+Use `--draft` for WIP, `--reviewer @user1` to wire reviewers, `--base` for non-default targets.
 
 ---
 
-## Watching CI checks
+## CI status checks
 
-After pushing or opening the PR, the agent should wait for CI before declaring success.
-
-### Preferred: `gh pr checks`
-
+**Preferred (when `gh` works):**
 ```sh
-gh pr checks                    # one-shot snapshot
-gh pr checks --watch            # blocks until all checks resolve
-gh pr view --json statusCheckRollup \
-  --jq '.statusCheckRollup[] | "\(.name): \(.conclusion // .status)"'
+gh pr checks <PR>                  # snapshot
+gh pr checks <PR> --watch          # blocks until terminal
+gh run view <run-id> --log-failed  # logs of a specific failed run
+gh run rerun <run-id> --failed     # re-run only failed jobs
 ```
 
-For a specific failed run, get logs:
+**Fallback** — when `gh` is unavailable OR the token is a fine-grained PAT (the bundled scripts handle both):
 
 ```sh
-gh run list --branch feat/short-summary --limit 5
-gh run view <run-id> --log-failed
-gh run rerun <run-id> --failed   # re-run only failed jobs without pushing
+python ${CLAUDE_PLUGIN_ROOT}/scripts/pr_status.py --repo OWNER/REPO --pr N           # snapshot
+python ${CLAUDE_PLUGIN_ROOT}/scripts/pr_status.py --repo OWNER/REPO --pr N --watch   # poll until terminal
+python ${CLAUDE_PLUGIN_ROOT}/scripts/pr_logs.py   --repo OWNER/REPO --pr N --out ./logs
 ```
 
-### Fallback: when `gh pr checks` doesn't work
+`pr_status.py` combines three signals (`mergeable_state`, GraphQL `statusCheckRollup.state`, Actions runs by `head_sha`) so the answer is correct regardless of token type. Exit codes: `0=pass, 1=fail, 2=pending, 3=error, 4=watch timeout`. Use `--json` for machine output.
 
-`gh pr checks` can fail for two non-obvious reasons:
+Coverage caveat: the scripts cover GitHub Actions checks. External CI (CircleCI, Buildkite, Codecov via Checks API) is invisible to fine-grained PATs no matter the path — switch to a classic PAT or GitHub App if you need it.
 
-1. **`gh` not installed** in the current environment (minimal sandbox, CI image, etc.)
-2. **The token is a fine-grained PAT.** GitHub deliberately blocks fine-grained PATs from reading individual check-run details — both via `GET /repos/.../check-runs` (REST) and via `statusCheckRollup.contexts.nodes[].name` (GraphQL). `gh pr checks` walks those nodes, hits the FORBIDDEN, and bails with `Resource not accessible by personal access token`. No permission grant fixes this; the limitation is by token type. To use `gh pr checks` natively, the credentials must be a classic PAT (with `repo` scope) or a GitHub App.
-
-When either applies, fall back to three direct API calls — together they answer everything `gh pr checks` would.
-
-**1. Aggregate "did CI pass?" — `statusCheckRollup.state`** (works with fine-grained PATs):
-
-```sh
-curl -sH "Authorization: bearer $GITHUB_TOKEN" -H 'Content-Type: application/json' \
-  https://api.github.com/graphql -d "{
-    \"query\":\"query { repository(owner:\\\"$OWNER\\\",name:\\\"$REPO\\\") {
-      pullRequest(number:$PR) {
-        commits(last:1) { nodes { commit { statusCheckRollup { state } } } }
-      } } }\"
-  }" | jq -r '.data.repository.pullRequest.commits.nodes[0].commit.statusCheckRollup.state'
-# → SUCCESS | FAILURE | PENDING | ERROR
-```
-
-**2. Mergeable state — `pull.mergeable_state`** (gives required-check awareness when the repo has branch protection):
-
-```sh
-curl -sH "Authorization: token $GITHUB_TOKEN" \
-  "https://api.github.com/repos/$OWNER/$REPO/pulls/$PR" \
-  | jq -r '.mergeable_state'
-# → clean   = required checks pass + branch up-to-date + reviews ok → ready to merge
-# → unstable = optional checks failed but mergeable
-# → blocked = something required is blocking
-# → behind  = needs rebase against base
-# → dirty   = merge conflicts
-# → unknown = GitHub still computing (retry) or PR closed
-```
-
-`mergeable_state` only encodes required-check status when the repo has branch protection or rulesets configured — those are Pro+ features for private repos. Public repos get them free. If neither is configured, GitHub treats every check as optional, and the signal degrades to "is the PR open and conflict-free."
-
-**3. Per-workflow detail — Actions API** (works with `Actions: Read`):
-
-```sh
-SHA=$(curl -sH "Authorization: token $GITHUB_TOKEN" \
-        "https://api.github.com/repos/$OWNER/$REPO/pulls/$PR" | jq -r .head.sha)
-
-# Snapshot
-curl -sH "Authorization: token $GITHUB_TOKEN" \
-  "https://api.github.com/repos/$OWNER/$REPO/actions/runs?head_sha=$SHA" \
-  | jq -r '.workflow_runs[] | "\(.name): \(.status) \(.conclusion // "")"'
-
-# Drill into a failed run's jobs and steps
-curl -sH "Authorization: token $GITHUB_TOKEN" \
-  "https://api.github.com/repos/$OWNER/$REPO/actions/runs/$RUN_ID/jobs" \
-  | jq -r '.jobs[] | "\(.name): \(.conclusion)" + (
-      [.steps[]? | select(.conclusion == "failure") | "  failed step: " + .name] | join("\n")
-    )'
-
-# Failed-job logs (returns redirect to a zipped log file)
-curl -sLH "Authorization: token $GITHUB_TOKEN" \
-  "https://api.github.com/repos/$OWNER/$REPO/actions/jobs/$JOB_ID/logs" -o job-logs.zip
-```
-
-Note: `head_sha` must be the **full 40-char SHA** — abbreviated SHAs silently return empty results.
-
-**4. Watch loop — poll until terminal state** (replaces `gh pr checks --watch`):
-
-```sh
-SHA=$(curl -sH "Authorization: token $GITHUB_TOKEN" \
-        "https://api.github.com/repos/$OWNER/$REPO/pulls/$PR" | jq -r .head.sha)
-while :; do
-  R=$(curl -sH "Authorization: token $GITHUB_TOKEN" \
-        "https://api.github.com/repos/$OWNER/$REPO/actions/runs?head_sha=$SHA")
-  PENDING=$(jq '[.workflow_runs[] | select(.status != "completed")] | length' <<<"$R")
-  TOTAL=$(jq '.total_count' <<<"$R")
-  FAILED=$(jq '[.workflow_runs[] | select(.conclusion=="failure" or .conclusion=="cancelled")] | length' <<<"$R")
-  printf "%s  %d/%d done, %d failed\n" "$(date +%T)" $((TOTAL-PENDING)) "$TOTAL" "$FAILED"
-  [ "$PENDING" = "0" ] && break
-  sleep 30
-done
-[ "$FAILED" = "0" ] && echo "all green" || echo "CI failed"
-```
-
-This Actions-API path covers GitHub Actions checks only. External CI providers (CircleCI, Buildkite, Codecov) write to the Checks API, not the Actions API — those *will* be invisible to a fine-grained PAT, regardless of fallback. For Actions-only repos (the common case), coverage is complete.
-
-### Don't merge a PR with failing required checks
-
-If a check is consistently flaky, fix it or mark it non-required — don't bypass it.
+**Never merge a PR with failing required checks.** Fix flaky checks; don't bypass them.
 
 ---
 
 ## Code review
 
-Request reviewers on creation (`--reviewer`) or after:
-
 ```sh
 gh pr edit 123 --add-reviewer @user
-```
-
-Read review comments programmatically (the agent often misses inline comments left on the diff):
-
-```sh
-gh api repos/OWNER/REPO/pulls/123/comments --jq '.[] | "\(.path):\(.line) — \(.user.login): \(.body)"'
 gh pr view 123 --comments
+gh api repos/OWNER/REPO/pulls/123/comments \
+  --jq '.[] | "\(.path):\(.line) — \(.user.login): \(.body)"'   # inline review comments
 ```
 
-Address feedback in new commits and push — don't force-push to "clean up" review history; reviewers lose their context.
+Address feedback in new commits. Don't force-push to "clean up" review history mid-review — reviewers lose context.
 
 ---
 
 ## Merging
 
-Prefer `--squash` for a clean linear history. Use `--auto` to set the PR to merge automatically once required checks pass:
-
 ```sh
-# Merge now, squash, delete branch
-gh pr merge 123 --squash --delete-branch
-
-# Auto-merge as soon as checks pass (most useful pattern)
-gh pr merge 123 --auto --squash --delete-branch
+gh pr merge <PR> --auto --squash --delete-branch    # most common
+gh pr merge <PR> --squash --delete-branch           # merge now
 ```
 
-Strategy choice (use whichever the repo prefers — check `gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed`):
-- `--squash` — best for feature branches with messy in-progress commits. Single tidy commit on `main`.
-- `--rebase` — preserves all commits as a linear sequence. Useful when each commit is meaningful and you want bisectability.
-- `--merge` — preserves the branch topology. Use only when explicit branch history matters (e.g., release branches).
+Strategy choice (check repo settings: `gh repo view --json mergeCommitAllowed,squashMergeAllowed,rebaseMergeAllowed`):
+- `--squash` — clean linear history, single commit per PR. Default for feature work.
+- `--rebase` — preserves all commits in linear order. Use when each commit is meaningful.
+- `--merge` — preserves branch topology. Use only when explicit history matters.
 
 After merge:
-
 ```sh
-git switch main
-git pull --ff-only
-git branch -d feat/short-summary    # local cleanup; -D if not yet merged locally but already merged upstream
+git switch main && git pull --ff-only && git branch -d <branch>
 ```
 
 ---
 
 ## Resolving conflicts
 
-When `gh pr merge` reports merge conflicts, resolve locally:
-
 ```sh
 git fetch origin
-git switch feat/short-summary
+git switch <branch>
 git rebase origin/main           # or `git merge origin/main` if rebase is forbidden
 # resolve files, `git add` them
 git rebase --continue
-git push --force-with-lease      # force only safe with lease, never plain --force
+git push --force-with-lease
 ```
 
 ---
@@ -303,11 +173,11 @@ git push --force-with-lease      # force only safe with lease, never plain --for
 ## Common gotchas
 
 - **Default branch isn't always `main`.** `gh repo view --json defaultBranchRef --jq .defaultBranchRef.name`.
-- **Rate limits**: 5000 req/hr authenticated. Check before bulk ops: `gh api rate_limit`.
-- **Fine-grained PATs** need explicit per-permission and per-repo scopes. `Resource not accessible by personal access token` means your token is missing a permission, not that the API is wrong.
-- **`gh pr create` from a detached HEAD or a branch with no upstream** silently does nothing useful — push the branch first (`git push -u origin <branch>`), then create the PR.
-- **`gh pr merge --auto` requires "auto-merge" enabled** on the repo settings. If it errors, tell the user to enable it under Settings → General → Pull Requests.
-- **Required status checks block merge** even with admin override unless explicitly bypassed. Wait or fix; don't bypass.
+- **Rate limits**: 5000 req/hr. Check via `gh api rate_limit`.
+- **`Resource not accessible by personal access token`** = the token lacks a permission, not that the API is broken. For fine-grained PATs, also possible the resource is permanently blocked for that token type (e.g., individual check-runs).
+- **`gh pr create` from a branch with no upstream** does nothing useful — `git push -u origin <branch>` first.
+- **`gh pr merge --auto` requires auto-merge enabled** in repo settings (Settings → General → Pull Requests).
+- **Required status checks block merge** even with admin override unless explicitly bypassed. Wait or fix.
 
 ---
 
@@ -323,14 +193,14 @@ gh repo view owner/repo
 
 # Branch + commit
 git switch -c feat/x origin/main
-git add -p && git commit -m "feat: …"
+git add -p && git commit -m "feat: ..."
 git push -u origin feat/x
 
 # PR
-gh pr create --title "…" --body "…"
-gh pr checks --watch
+gh pr create --title "..." --body "..."
+python ${CLAUDE_PLUGIN_ROOT}/scripts/pr_status.py --repo owner/repo --pr N --watch
 gh pr view --comments
 
 # Merge
-gh pr merge --auto --squash --delete-branch
+gh pr merge <PR> --auto --squash --delete-branch
 ```
