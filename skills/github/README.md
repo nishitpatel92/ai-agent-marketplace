@@ -39,7 +39,7 @@ hermes skills install \
   https://raw.githubusercontent.com/nishitpatel92/ai-agent-marketplace/main/skills/github/SKILL.md
 ```
 
-> ⚠️ The URL-based install only fetches `SKILL.md`. The skill's `gh pr checks` happy path still works, but the fine-grained-PAT fallback (which uses `scripts/pr_status.py`) will not. Use the GitHub-source install above for full functionality.
+> ⚠️ The URL-based install only fetches `SKILL.md`. Calls into `scripts/` (the fine-grained-PAT fallback path uses `scripts/pr_status.py`) will fail with "No such file or directory." This is a Hermes URL-installer limitation, not a skill design choice — the GitHub-source install above is strictly better when scripts matter.
 
 ### Manual
 

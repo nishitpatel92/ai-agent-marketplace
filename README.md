@@ -56,7 +56,7 @@ hermes skills install \
   https://raw.githubusercontent.com/nishitpatel92/ai-agent-marketplace/main/skills/github/SKILL.md
 ```
 
-> ⚠️ This URL-based path **only fetches `SKILL.md`** — Hermes' own docs say *"multi-file skills with `references/` or `scripts/` subfolders need a manifest we can't discover from a bare URL."* The skill's `gh pr checks` happy path still works, but the fine-grained-PAT fallback (which calls `python scripts/pr_status.py …`) will fail with "No such file or directory." Use the GitHub-source install above unless you specifically need a single-file copy.
+> ⚠️ This URL-based path **only fetches `SKILL.md`** — Hermes' own docs say *"multi-file skills with `references/` or `scripts/` subfolders need a manifest we can't discover from a bare URL."* Skills in this repo bias toward scripts for plumbing (see [conventions](#skill-style--thin-skill-scripts-do-plumbing)), so URL-only installs lose meaningful capability — calls like `python scripts/pr_status.py …` will fail with "No such file or directory." Use the GitHub-source install above; it's strictly better for any skill that has a `scripts/` directory.
 
 ### Codex / others
 
@@ -73,13 +73,13 @@ Why: skill text is loaded into the agent's context every time it activates. Long
 Concrete rules:
 
 1. **`SKILL.md` is intent-first.** Sections describe decisions, conventions, and pitfalls. Commands shown should be one-liners or simple chains the agent can adapt mid-task.
-2. **Scripts are stdlib-only Python by default** (no `pip install` step in fresh sandboxes). Shell or other tools when there's a clear win.
-3. **Scripts are referenced via paths relative to the skill root** (e.g. `scripts/pr_status.py`), per the spec.
-4. **Scripts read auth from env** — `GITHUB_TOKEN`, etc. — and document required permissions in their docstring.
-5. **Scripts have machine-friendly output** (`--json`) and **standard exit codes**. The agent should be able to chain them.
-6. **The skill's frontmatter `description`** is the activation hook — make it precise. The model uses it to decide when to load this skill.
-7. **Declare `compatibility`** in the frontmatter when the skill needs specific tooling (`gh`, `jq`, Python version, network access, etc.).
-8. **The skill's happy path should not require scripts.** Scripts are for fallback / advanced cases. That way a single-file install (e.g. Hermes URL install) still gets useful behavior.
+2. **Bias toward scripts whenever they reduce `SKILL.md` complexity or context.** The split is intent/reasoning vs plumbing/heavy-lifting. If extracting a multi-step API call, polling loop, retry policy, or parsing routine into a script lets the SKILL stay short and direct, do it — even if the script becomes load-bearing for the skill's main behavior. Single-file-installer compatibility is *not* a reason to inline plumbing back into the SKILL; that's an installer limitation, not a skill design constraint.
+3. **Scripts are stdlib-only Python by default** (no `pip install` step in fresh sandboxes). Shell or other tools when there's a clear win.
+4. **Scripts are referenced via paths relative to the skill root** (e.g. `scripts/pr_status.py`), per the spec.
+5. **Scripts read auth from env** — `GITHUB_TOKEN`, etc. — and document required permissions in their docstring.
+6. **Scripts have machine-friendly output** (`--json`) and **standard exit codes**. The agent should be able to chain them.
+7. **The skill's frontmatter `description`** is the activation hook — make it precise. The model uses it to decide when to load this skill.
+8. **Declare `compatibility`** in the frontmatter when the skill needs specific tooling (`gh`, `jq`, Python version, network access, etc.).
 
 If you find yourself pasting >5 lines of curl/jq/loop into a SKILL, that's a script.
 
@@ -90,8 +90,7 @@ PRs welcome. Bar for adding a skill:
 1. Solves a real, recurring agent task.
 2. Conforms to https://agentskills.io/specification (validate with `skills-ref validate ./skills/<name>` if you have it installed).
 3. Frontmatter `description` is a precise activation hook.
-4. Programmatic complexity is in `scripts/`, not in the SKILL.
-5. Skill works (degraded but useful) even when only `SKILL.md` is available, for compatibility with single-file installers.
+4. Programmatic complexity lives in `scripts/`, not in the SKILL — bias toward scripts whenever they reduce SKILL text or context, even when that means the skill genuinely depends on them.
 
 ## License
 
