@@ -12,7 +12,7 @@
   "plugins": [
     {
       "name": "github",
-      "source": "./plugins/github",
+      "source": "./skills/github",
       "description": "Best-practice patterns for interacting with GitHub via the gh CLI and git: cloning, branching, PR creation, status checks, and merging."
     }
   ]
