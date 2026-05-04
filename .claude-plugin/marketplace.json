@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "ai-agent-marketplace",
+  "owner": {
+    "name": "Nishit Patel",
+    "url": "https://github.com/nishitpatel92"
+  },
+  "metadata": {
+    "description": "Framework-agnostic plugins, skills, and agents that work across Claude Code, Hermes, Codex, and other agentic CLIs.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "github",
+      "source": "./plugins/github",
+      "description": "Best-practice patterns for interacting with GitHub via the gh CLI and git: cloning, branching, PR creation, status checks, and merging."
+    }
+  ]
+}
