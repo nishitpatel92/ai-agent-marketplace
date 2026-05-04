@@ -11,27 +11,34 @@ ai-agent-marketplace/
 │   └── <plugin>/
 │       ├── .claude-plugin/plugin.json    # plugin manifest (Claude Code)
 │       ├── README.md                     # human-readable plugin docs
-│       ├── scripts/                      # programmatic complexity lives here
-│       └── skills/<skill>/SKILL.md       # what the agent loads
+│       └── skills/
+│           └── <skill>/                  # skill root — per agentskills.io spec
+│               ├── SKILL.md
+│               ├── scripts/              # programmatic complexity (optional)
+│               ├── references/           # detailed docs loaded on demand (optional)
+│               └── assets/               # static resources (optional)
 └── README.md
 ```
 
+Every skill conforms to the [Agent Skills specification](https://agentskills.io/specification): the skill is a directory containing `SKILL.md` with required frontmatter (`name`, `description`), and the skill's name must match its parent directory. `scripts/`, `references/`, and `assets/` colocate with `SKILL.md` and are referenced via paths relative to the skill root.
+
 ## Skill style — thin SKILL, scripts do plumbing
 
-The bar for every plugin in this repo:
+In addition to the spec, this repo enforces one editorial rule:
 
 > **The skill teaches the agent *what* and *why*. Anything programmatic — multi-step API logic, polling, parsing, archive extraction — lives in `scripts/`.**
 
-Why: skill text is loaded into the agent's context every time it activates. Long curl pipelines, jq incantations, and watch loops bloat the context for no benefit — the agent never improves them, just reads and re-emits them. Pushing them into Python keeps the skill compact and lets a script encapsulate edge cases (token-type fallback, error handling, retry policy) without the agent re-deriving them each turn.
+Why: skill text is loaded into the agent's context every time it activates. Long curl pipelines, jq incantations, and watch loops bloat the context for no benefit — the agent never improves them, just reads and re-emits them. Pushing them into Python keeps the skill compact and lets a script encapsulate edge cases (token-type fallback, error handling, retry policy) without the agent re-deriving them each turn. (This aligns with the spec's "progressive disclosure" guidance: keep `SKILL.md` itself small; defer detail to scripts and `references/`.)
 
 Concrete rules:
 
 1. **`SKILL.md` is intent-first.** Sections describe decisions, conventions, and pitfalls. Commands shown should be one-liners or simple chains the agent can adapt mid-task.
 2. **Scripts are stdlib-only Python by default** (no `pip install` step in fresh sandboxes). Shell or other tools when there's a clear win.
-3. **Scripts are referenced as `${CLAUDE_PLUGIN_ROOT}/scripts/<name>.<ext>`** in the SKILL.md. For non-Claude frameworks, users adapt the path.
+3. **Scripts are referenced via paths relative to the skill root** (e.g. `scripts/pr_status.py`), per the spec.
 4. **Scripts read auth from env** — `GITHUB_TOKEN`, etc. — and document required permissions in their docstring.
 5. **Scripts have machine-friendly output** (`--json`) and **standard exit codes**. The agent should be able to chain them.
 6. **The skill's frontmatter `description`** is the activation hook — make it precise. The model uses it to decide when to load this skill.
+7. **Declare `compatibility`** in the frontmatter when the skill needs specific tooling (`gh`, `jq`, Python version, network access, etc.).
 
 If you find yourself pasting >5 lines of curl/jq/loop into a SKILL, that's a script.
 

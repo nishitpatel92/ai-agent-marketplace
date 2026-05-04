@@ -1,13 +1,19 @@
 ---
 name: github
-description: Use when working with GitHub repositories — cloning, creating branches, opening pull requests, monitoring CI checks, requesting reviews, or merging. Covers best practices for `gh` CLI and `git`. Apply this skill any time the task involves a GitHub repo URL, a PR, a branch, or `.github/`.
+description: Use when working with GitHub repositories — cloning, creating branches, opening pull requests, monitoring CI checks, requesting reviews, or merging. Covers best-practice patterns for `gh` CLI and `git`. Apply when the task involves a GitHub repo URL, a PR number, a branch, anything in `.github/`, or words like "pull request", "PR check", "merge", "rebase".
+license: MIT
+compatibility: Requires git and curl. Python 3.8+ for bundled scripts (stdlib only). `gh` CLI optional but used as the preferred path when available.
+metadata:
+  author: nishitpatel92
+  version: "0.2.0"
+  source: https://github.com/nishitpatel92/ai-agent-marketplace
 ---
 
 # GitHub workflow skill
 
 Best-practice patterns for `gh` and `git`. Standard flow: **clone → branch → commit → push → PR → checks → review → merge → cleanup**.
 
-Programmatic operations (status checks, watch loops, log extraction) live in `scripts/` so this skill stays short. Invoke them via `python ${CLAUDE_PLUGIN_ROOT}/scripts/<name>.py` (or adapt the path for your framework).
+Programmatic operations (CI status, watch loops, log extraction) live in [`scripts/`](scripts/) so this skill stays short. Paths in this file are relative to the skill root.
 
 ---
 
@@ -112,12 +118,12 @@ gh run rerun <run-id> --failed     # re-run only failed jobs
 **Fallback** — when `gh` is unavailable OR the token is a fine-grained PAT (the bundled scripts handle both):
 
 ```sh
-python ${CLAUDE_PLUGIN_ROOT}/scripts/pr_status.py --repo OWNER/REPO --pr N           # snapshot
-python ${CLAUDE_PLUGIN_ROOT}/scripts/pr_status.py --repo OWNER/REPO --pr N --watch   # poll until terminal
-python ${CLAUDE_PLUGIN_ROOT}/scripts/pr_logs.py   --repo OWNER/REPO --pr N --out ./logs
+python scripts/pr_status.py --repo OWNER/REPO --pr N           # snapshot
+python scripts/pr_status.py --repo OWNER/REPO --pr N --watch   # poll until terminal
+python scripts/pr_logs.py   --repo OWNER/REPO --pr N --out ./logs
 ```
 
-`pr_status.py` combines three signals (`mergeable_state`, GraphQL `statusCheckRollup.state`, Actions runs by `head_sha`) so the answer is correct regardless of token type. Exit codes: `0=pass, 1=fail, 2=pending, 3=error, 4=watch timeout`. Use `--json` for machine output.
+[`scripts/pr_status.py`](scripts/pr_status.py) combines three signals (`mergeable_state`, GraphQL `statusCheckRollup.state`, Actions runs by `head_sha`) so the answer is correct regardless of token type. Exit codes: `0=pass, 1=fail, 2=pending, 3=error, 4=watch timeout`. Use `--json` for machine output.
 
 Coverage caveat: the scripts cover GitHub Actions checks. External CI (CircleCI, Buildkite, Codecov via Checks API) is invisible to fine-grained PATs no matter the path — switch to a classic PAT or GitHub App if you need it.
 
@@ -198,7 +204,7 @@ git push -u origin feat/x
 
 # PR
 gh pr create --title "..." --body "..."
-python ${CLAUDE_PLUGIN_ROOT}/scripts/pr_status.py --repo owner/repo --pr N --watch
+python scripts/pr_status.py --repo owner/repo --pr N --watch
 gh pr view --comments
 
 # Merge

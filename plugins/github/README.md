@@ -8,13 +8,17 @@ The skill teaches the canonical command for each step (`gh pr merge --auto --squ
 
 ```
 plugins/github/
-├── .claude-plugin/plugin.json
-├── README.md                 # this file
-├── scripts/
-│   ├── pr_status.py          # CI status snapshot + watch, token-type-agnostic
-│   └── pr_logs.py            # download + extract logs of failed Actions jobs
-└── skills/github/SKILL.md    # what the agent loads
+├── .claude-plugin/plugin.json    # Claude Code plugin manifest
+├── README.md                     # this file
+└── skills/
+    └── github/                    # skill root (per agentskills.io spec)
+        ├── SKILL.md               # what the agent loads
+        └── scripts/
+            ├── pr_status.py       # CI status snapshot + watch
+            └── pr_logs.py         # extract logs of failed Actions jobs
 ```
+
+The skill follows the [Agent Skills specification](https://agentskills.io/specification): `SKILL.md` at skill root with required frontmatter (`name` matching the directory, `description`), and `scripts/` colocated with `SKILL.md`. Paths in `SKILL.md` are relative to the skill root.
 
 ## Scripts
 
